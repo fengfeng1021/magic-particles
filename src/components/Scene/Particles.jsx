@@ -169,12 +169,9 @@ export default function Particles({ handData }) {
         lineEnd = { x: handData[1].x * viewport.width, y: handData[1].y * viewport.height }
     }
 
-    // 旋轉控制：形狀/拉線時不轉，自由時慢轉
-    if (shapeTargetRef.current || isDualLineMode) {
-        pointsRef.current.rotation.y += (0 - pointsRef.current.rotation.y) * 0.1
-    } else {
-        pointsRef.current.rotation.y += delta * 0.05
-    }
+    // 🚫 移除所有旋轉邏輯，強制鎖定正面視角
+    // 這樣不管你做什麼操作，畫布永遠是正對著你的
+    pointsRef.current.rotation.set(0, 0, 0)
 
     const calmColor = new THREE.Color("#00ffff") 
     const pinchColor = new THREE.Color("#ff0055") 
