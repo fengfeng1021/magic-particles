@@ -10,7 +10,9 @@ export default function HandTracker({ onHandUpdate }) {
   useEffect(() => {
     const setup = async () => {
       try {
-        const vision = await FilesetResolver.forVisionTasks('/models/vision_wasm_internal.wasm')
+        const vision = await FilesetResolver.forVisionTasks(
+  import.meta.env.BASE_URL + 'models/vision_wasm_internal.wasm'
+)
         handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
