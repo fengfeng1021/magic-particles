@@ -2,6 +2,25 @@
 import { useEffect, useRef, useState } from 'react'
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
 
+// 輔助函數：計算伸出的手指數量
+function countFingers(landmarks) {
+  let count = 0
+  // 手指指尖 (Tip) 與 指節 (PIP) 的索引對照
+  // 拇指(4,2), 食指(8,6), 中指(12,10), 無名指(16,14), 小指(20,17)
+  
+  // 1. 拇指判斷 (X軸差異)
+  // 右手拇指在左邊，左手拇指在右邊，這裡做簡單判斷
+  if (Math.abs(landmarks[4].x - landmarks[2].x) > 0.05) count++
+
+  // 2. 其他四指判斷 (Y軸高度，指尖比指節高)
+  if (landmarks[8].y < landmarks[6].y) count++  // 食指
+  if (landmarks[12].y < landmarks[10].y) count++ // 中指
+  if (landmarks[16].y < landmarks[14].y) count++ // 無名指
+  if (landmarks[20].y < landmarks[17].y) count++ // 小指
+
+  return count
+}
+
 export default function HandTracker({ onHandUpdate }) {
   const videoRef = useRef(null)
   const handLandmarkerRef = useRef(null)
@@ -72,24 +91,23 @@ export default function HandTracker({ onHandUpdate }) {
         // 準備一個陣列來存所有偵測到的手
         const handsData = []
 
-        // 遍歷每一隻偵測到的手 (results.landmarks 是一個陣列)
         for (const hand of results.landmarks) {
           const indexTip = hand[8]
           const thumbTip = hand[4]
           
-          // 這裡只負責標準化到 -0.5 ~ 0.5 的區間
-          // 具體的螢幕寬度映射交給 Particles 組件處理，這樣才精準
-          const x = (0.5 - indexTip.x) // 翻轉 X 軸 (鏡像)
-          const y = -(indexTip.y - 0.5) // 翻轉 Y 軸
+          const x = (0.5 - indexTip.x) 
+          const y = -(indexTip.y - 0.5) 
 
-          // 計算捏合
           const distance = Math.sqrt(
             Math.pow(indexTip.x - thumbTip.x, 2) + 
             Math.pow(indexTip.y - thumbTip.y, 2)
           )
           const isPinching = distance < 0.1
+          
+          // 新增：計算這隻手比出的數字
+          const fingerCount = countFingers(hand)
 
-          handsData.push({ x, y, isPinching })
+          handsData.push({ x, y, isPinching, gesture: fingerCount })
         }
 
         onHandUpdate(handsData) // 回傳陣列
