@@ -1,10 +1,18 @@
 // src/components/Scene/Particles.jsx
 import { useRef, useMemo } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber' // 引入 useThree 用於獲取螢幕寬度
 import * as THREE from 'three'
 
 export default function Particles({ handData }) {
+  // 獲取視窗的寬高 (Three.js 單位)，這能確保手的位置跟滑鼠/螢幕 1:1 對應
+  const { viewport } = useThree() 
+  
   const pointsRef = useRef()
+  // 新增：記錄上一幀捏合狀態
+  const prevPinchRef = useRef(false)
+  // 新增：記錄爆炸波的剩餘能量 (0 ~ 1)
+  const shockwaveRef = useRef(0)
+  
   const count = 5000 // 粒子數量
 
   // 初始化數據：位置、原始位置、速度、顏色
@@ -39,126 +47,144 @@ export default function Particles({ handData }) {
     const posAttr = pointsRef.current.geometry.attributes.position
     const colAttr = pointsRef.current.geometry.attributes.color
 
-    // 獲取手部數據
-    const hasHand = !!handData
-    let targetX = 0, targetY = 0
-    let isPinching = false
+    // 1. 處理手勢觸發 (這裡只取第一隻手的捏合來觸發全域爆炸，簡化邏輯)
+    // 如果你有兩隻手，任一隻手放開都能觸發衝擊波
+    const anyHandPinching = handData.some(h => h.isPinching)
     
-    if (hasHand) {
-      // 映射座標範圍
-      targetX = handData.x * 10
-      targetY = handData.y * 6
-      isPinching = handData.isPinching
+    if (prevPinchRef.current && !anyHandPinching) {
+      shockwaveRef.current = 1.0 
+    }
+    prevPinchRef.current = anyHandPinching
+
+    if (shockwaveRef.current > 0) {
+      shockwaveRef.current -= delta * 2.0 
+      if (shockwaveRef.current < 0) shockwaveRef.current = 0
     }
 
-    // 定義顏色 (為了效能，我們在迴圈外定義)
-    const calmColor = new THREE.Color("#00ffff") // 青色
-    const pinchColor = new THREE.Color("#ff0055") // 緋紅色
+    const calmColor = new THREE.Color("#00ffff") 
+    const pinchColor = new THREE.Color("#ff0055") 
+    const whiteColor = new THREE.Color("#ffffff")
     const tempColor = new THREE.Color()
+
+    // 2. 定義邊界 (根據當前視窗大小)
+    // viewport.width 是 Three.js 場景的可視寬度，這確保了精準對應
+    const boundX = viewport.width / 2 + 1 // 左右邊界
+    const boundY = viewport.height / 2 + 1 // 上下邊界
+    const boundZ = 5 // 前後邊界
 
     for (let i = 0; i < count; i++) {
       const i3 = i * 3
-
-      // 1. 獲取當前位置
       const px = posAttr.array[i3]
       const py = posAttr.array[i3 + 1]
       const pz = posAttr.array[i3 + 2]
 
-      // 2. 獲取速度
       let vx = velocities[i3]
       let vy = velocities[i3 + 1]
       let vz = velocities[i3 + 2]
 
-      if (hasHand) {
-        // --- 互動模式 ---
+      // --- [A] 手勢互動 (遍歷每一隻手) ---
+      let affectedByHand = false
+      
+      handData.forEach(hand => {
+        // 將標準化座標轉換為真實的世界座標 (這就是精準度的關鍵！)
+        const targetX = hand.x * viewport.width
+        const targetY = hand.y * viewport.height
         
-        // 計算到手的距離
         const dx = targetX - px
         const dy = targetY - py
-        const dz = 0 - pz // 吸引到 Z=0 平面
+        const dz = 0 - pz
         
         const distSq = dx*dx + dy*dy + dz*dz
-        const dist = Math.sqrt(distSq) + 0.1 // 避免除以 0
+        const dist = Math.sqrt(distSq) + 0.1
 
-        if (isPinching) {
-          // [模式 A: 蓄力/黑洞]
-          // 強力吸引，無視距離
-          const force = 15.0 * delta 
+        // 根據捏合狀態給予不同的力
+        if (hand.isPinching) {
+          // 捏合：強力黑洞吸引
+          const force = 20.0 * delta
           vx += (dx / dist) * force
           vy += (dy / dist) * force
           vz += (dz / dist) * force
-          
-          // 增加一點隨機抖動，感覺能量很不穩定
-          vx += (Math.random() - 0.5) * 0.5
-          vy += (Math.random() - 0.5) * 0.5
-          vz += (Math.random() - 0.5) * 0.5
-
-          // 變色：逐漸變紅
-          tempColor.set(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i))
-          tempColor.lerp(pinchColor, 0.1) // 快速變紅
-
+          affectedByHand = true
         } else {
-          // [模式 B: 跟隨/漩渦]
-          // 讓粒子圍繞手指旋轉 (計算切線力)
-          // 這會讓粒子形成像龍捲風一樣的效果
-          const force = 2.0 * delta // 較弱的吸引力
-          
+          // 張開：溫和的氣流跟隨
+          const force = 5.0 * delta
           vx += (dx / dist) * force
           vy += (dy / dist) * force
           vz += (dz / dist) * force
-
-          // 加入旋轉力 (Cross Product 概念的簡化版)
-          vx += -dy * 0.5 * delta
-          vy += dx * 0.5 * delta
-
-          // 變色：慢慢變回青色
-          tempColor.set(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i))
-          tempColor.lerp(calmColor, 0.05)
+          
+          // 旋轉力 (讓粒子繞著手轉)
+          const spin = 5.0 * delta
+          vx += -dy * spin / dist // 除以 dist 讓近處旋轉快，遠處慢
+          vy += dx * spin / dist
         }
+      })
 
+      // --- [B] 全域特效 ---
+      if (shockwaveRef.current > 0) {
+        // 簡單的爆炸：從中心向外推
+        const distOrigin = Math.sqrt(px*px + py*py + pz*pz) + 0.1
+        const boom = 50.0 * delta * shockwaveRef.current
+        vx += (px / distOrigin) * boom
+        vy += (py / distOrigin) * boom
+        vz += (pz / distOrigin) * boom * 2
+        
+        // 爆炸變色
+        tempColor.set(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i))
+        tempColor.lerp(whiteColor, 0.2)
+      } else if (affectedByHand) {
+        // 如果被手影響，變紅
+        tempColor.set(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i))
+        tempColor.lerp(pinchColor, 0.1)
       } else {
-        // --- 歸位模式 ---
+        // 沒人理，變回青色
+        tempColor.set(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i))
+        tempColor.lerp(calmColor, 0.05)
+      }
+
+      // --- [C] 歸位力 (當沒有手的時候，慢慢飄回原位) ---
+      if (handData.length === 0 && shockwaveRef.current <= 0) {
         const ox = originalPositions[i3]
         const oy = originalPositions[i3 + 1]
         const oz = originalPositions[i3 + 2]
-
-        // 彈簧力：拉回原點
-        vx += (ox - px) * 0.5 * delta
-        vy += (oy - py) * 0.5 * delta
-        vz += (oz - pz) * 0.5 * delta
-        
-        // 變色：變回青色
-        tempColor.set(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i))
-        tempColor.lerp(calmColor, 0.02)
+        vx += (ox - px) * 1.0 * delta
+        vy += (oy - py) * 1.0 * delta
+        vz += (oz - pz) * 1.0 * delta
       }
 
-      // 3. 物理模擬核心：摩擦力 (阻尼)
-      // 必須有阻尼，否則粒子會無限加速
-      const friction = isPinching ? 0.90 : 0.96 // 捏合時阻尼大一點，讓它快速聚攏
+      // --- [D] 邊界檢查 (Wall Bounce) ---
+      // 這是防止粒子散開到外面的關鍵
+      const bounceFactor = -0.6 // 反彈係數 (負數代表反向，0.6 代表損失一點能量)
+      
+      if (px > boundX) { vx *= bounceFactor; posAttr.array[i3] = boundX; }
+      else if (px < -boundX) { vx *= bounceFactor; posAttr.array[i3] = -boundX; }
+
+      if (py > boundY) { vy *= bounceFactor; posAttr.array[i3 + 1] = boundY; }
+      else if (py < -boundY) { vy *= bounceFactor; posAttr.array[i3 + 1] = -boundY; }
+      
+      if (pz > boundZ) { vz *= bounceFactor; posAttr.array[i3 + 2] = boundZ; }
+      else if (pz < -boundZ) { vz *= bounceFactor; posAttr.array[i3 + 2] = -boundZ; }
+
+      // --- [E] 更新位置與速度 ---
+      // 阻尼 (空氣阻力)
+      const friction = 0.95
       vx *= friction
       vy *= friction
       vz *= friction
 
-      // 4. 更新位置
-      posAttr.array[i3] = px + vx
-      posAttr.array[i3 + 1] = py + vy
-      posAttr.array[i3 + 2] = pz + vz
+      posAttr.array[i3] += vx
+      posAttr.array[i3 + 1] += vy
+      posAttr.array[i3 + 2] += vz
 
-      // 5. 更新速度緩存
       velocities[i3] = vx
       velocities[i3 + 1] = vy
       velocities[i3 + 2] = vz
 
-      // 6. 更新顏色
       colAttr.setXYZ(i, tempColor.r, tempColor.g, tempColor.b)
     }
 
-    // 告訴 Three.js 需要重繪
     posAttr.needsUpdate = true
     colAttr.needsUpdate = true
-    
-    // 整體微旋轉
-    pointsRef.current.rotation.y += delta * 0.1
+    pointsRef.current.rotation.y += delta * 0.05
   })
 
   return (

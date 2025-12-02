@@ -6,8 +6,8 @@ import Particles from './components/Scene/Particles'
 import HandTracker from './components/Webcam/HandTracker'
 
 function App() {
-  // handData 現在會包含 { x, y, isPinching }
-  const [handData, setHandData] = useState(null)
+  // handData 現在是一個陣列 []，可能包含 0, 1 或 2 隻手的資料
+  const [handData, setHandData] = useState([])
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>

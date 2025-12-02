@@ -28,7 +28,7 @@ export default function HandTracker({ onHandUpdate }) {
             delegate: 'CPU',
           },
           runningMode: 'VIDEO',
-          numHands: 1,
+          numHands: 2, // 開啟雙手追蹤
         }
       )
 
@@ -65,31 +65,39 @@ export default function HandTracker({ onHandUpdate }) {
   }
 
   const predictWebcam = () => {
-    // 確保影片有在跑，且寬高大於 0
     if (handLandmarkerRef.current && videoRef.current && videoRef.current.videoWidth > 0) {
       const results = handLandmarkerRef.current.detectForVideo(videoRef.current, Date.now())
 
       if (results.landmarks && results.landmarks.length > 0) {
-        const hand = results.landmarks[0]
-        const indexTip = hand[8]
-        const thumbTip = hand[4]
-        
-        // 座標計算
-        const x = (0.5 - indexTip.x) * 2 
-        const y = -(indexTip.y - 0.5) * 2
+        // 準備一個陣列來存所有偵測到的手
+        const handsData = []
 
-        const distance = Math.sqrt(
-          Math.pow(indexTip.x - thumbTip.x, 2) + 
-          Math.pow(indexTip.y - thumbTip.y, 2)
-        )
-        const isPinching = distance < 0.1
+        // 遍歷每一隻偵測到的手 (results.landmarks 是一個陣列)
+        for (const hand of results.landmarks) {
+          const indexTip = hand[8]
+          const thumbTip = hand[4]
+          
+          // 這裡只負責標準化到 -0.5 ~ 0.5 的區間
+          // 具體的螢幕寬度映射交給 Particles 組件處理，這樣才精準
+          const x = (0.5 - indexTip.x) // 翻轉 X 軸 (鏡像)
+          const y = -(indexTip.y - 0.5) // 翻轉 Y 軸
 
-        onHandUpdate({ x, y, isPinching })
+          // 計算捏合
+          const distance = Math.sqrt(
+            Math.pow(indexTip.x - thumbTip.x, 2) + 
+            Math.pow(indexTip.y - thumbTip.y, 2)
+          )
+          const isPinching = distance < 0.1
+
+          handsData.push({ x, y, isPinching })
+        }
+
+        onHandUpdate(handsData) // 回傳陣列
       } else {
-        onHandUpdate(null)
+        onHandUpdate([]) // 回傳空陣列而不是 null
       }
     }
-    // 即使沒檢測到，也要持續呼叫下一幀
+    // 持續呼叫
     animationFrameId.current = requestAnimationFrame(predictWebcam)
   }
 
