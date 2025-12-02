@@ -16,7 +16,7 @@ export default function HandTracker({ onHandUpdate }) {
         handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-            delegate: 'GPU',
+            delegate: 'CPU',
           },
           runningMode: 'VIDEO',
           numHands: 1,
@@ -29,7 +29,10 @@ export default function HandTracker({ onHandUpdate }) {
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream
-          videoRef.current.onloadeddata = () => predictWebcam()
+          videoRef.current.onloadeddata = () => {
+            videoRef.current.play() 
+    predictWebcam()
+  }
         }
       } catch (error) {
         console.error(error)
