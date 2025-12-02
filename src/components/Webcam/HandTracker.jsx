@@ -2,17 +2,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
 
-// 輔助函數：計算伸出的手指數量
+// 輔助函數：更嚴謹的手指計數
 function countFingers(landmarks) {
   let count = 0
-  // 手指指尖 (Tip) 與 指節 (PIP) 的索引對照
-  // 拇指(4,2), 食指(8,6), 中指(12,10), 無名指(16,14), 小指(20,17)
+  // 拇指：比較指尖和指節的 X 軸距離
+  const thumbTip = landmarks[4]
+  const thumbIp = landmarks[3] // 拇指指節
+  const thumbMcp = landmarks[2] // 拇指根部
   
-  // 1. 拇指判斷 (X軸差異)
-  // 右手拇指在左邊，左手拇指在右邊，這裡做簡單判斷
-  if (Math.abs(landmarks[4].x - landmarks[2].x) > 0.05) count++
+  // 簡單判斷：如果指尖離手掌中心的距離 > 指節離中心的距離，算伸出
+  // 這裡使用更簡單的 X 軸判斷 (適用於手掌正面對鏡頭)
+  if (Math.abs(thumbTip.x - thumbMcp.x) > Math.abs(thumbIp.x - thumbMcp.x)) {
+    count++
+  }
 
-  // 2. 其他四指判斷 (Y軸高度，指尖比指節高)
+  // 其他四指：比較指尖 (Tip) 和指節 (PIP - 第二關節) 的 Y 軸
+  // 注意：MediaPipe 的 Y 軸向下是正，所以指尖數值越小代表越高
   if (landmarks[8].y < landmarks[6].y) count++  // 食指
   if (landmarks[12].y < landmarks[10].y) count++ // 中指
   if (landmarks[16].y < landmarks[14].y) count++ // 無名指
@@ -28,12 +33,12 @@ export default function HandTracker({ onHandUpdate }) {
   
   const [isStarted, setIsStarted] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
+  // 新增：用於顯示當前偵測到的手勢數字 (Debug UI)
+  const [detectedGesture, setDetectedGesture] = useState("無")
 
   const startCamera = async () => {
     setIsStarted(true)
-    
     try {
-      // 1. 載入 AI 模型 (保持 CDN 方式)
       setStatusMsg('步驟 1/3: 下載 AI 模型...')
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
@@ -47,14 +52,11 @@ export default function HandTracker({ onHandUpdate }) {
             delegate: 'CPU',
           },
           runningMode: 'VIDEO',
-          numHands: 2, // 開啟雙手追蹤
+          numHands: 2,
         }
       )
 
-      // 2. 啟動攝像頭
       setStatusMsg('步驟 2/3: 啟動影像...')
-      
-      // ⚠️ 修正 A: 移除所有寬高限制，讓 iOS 自由發揮，避免卡住
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user' }, 
         audio: false 
@@ -64,18 +66,12 @@ export default function HandTracker({ onHandUpdate }) {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        
-        // ⚠️ 修正 B: iOS 必須明確呼叫 play()
         await videoRef.current.play()
-        
-        // ⚠️ 修正 C: 不等待 onloadeddata 事件，直接強制開始預測
-        // 為了保險，延遲 500ms 讓相機熱身
         setTimeout(() => {
-           setStatusMsg('') // 清除訊息
+           setStatusMsg('') 
            predictWebcam()
         }, 500)
       }
-
     } catch (error) {
       console.error(error)
       setStatusMsg(`❌ 錯誤: ${error.message || error}`)
@@ -88,8 +84,8 @@ export default function HandTracker({ onHandUpdate }) {
       const results = handLandmarkerRef.current.detectForVideo(videoRef.current, Date.now())
 
       if (results.landmarks && results.landmarks.length > 0) {
-        // 準備一個陣列來存所有偵測到的手
         const handsData = []
+        let maxGestureStr = ""
 
         for (const hand of results.landmarks) {
           const indexTip = hand[8]
@@ -104,18 +100,21 @@ export default function HandTracker({ onHandUpdate }) {
           )
           const isPinching = distance < 0.1
           
-          // 新增：計算這隻手比出的數字
           const fingerCount = countFingers(hand)
+          
+          // 更新 UI 顯示文字
+          maxGestureStr += `[${fingerCount}] `
 
           handsData.push({ x, y, isPinching, gesture: fingerCount })
         }
-
-        onHandUpdate(handsData) // 回傳陣列
+        
+        setDetectedGesture(maxGestureStr)
+        onHandUpdate(handsData)
       } else {
-        onHandUpdate([]) // 回傳空陣列而不是 null
+        setDetectedGesture("無")
+        onHandUpdate([])
       }
     }
-    // 持續呼叫
     animationFrameId.current = requestAnimationFrame(predictWebcam)
   }
 
@@ -128,27 +127,27 @@ export default function HandTracker({ onHandUpdate }) {
 
   return (
     <>
-      {/* ⚠️ 修正 D: 騙過 Safari 的關鍵樣式 
-         不要用 width: 1px, 不要用 opacity: 0
-         改成全螢幕大小，但是放在 z-index: -1 (被畫布蓋住)
-         這樣 Safari 才會認為這是一個「重要」的影片而開始渲染
-      */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted
         style={{ 
-          position: 'absolute', 
-          top: 0, 
-          left: 0, 
-          width: '100%', 
-          height: '100%', 
-          objectFit: 'cover',
-          zIndex: -1, // 藏在最後面
-          // opacity: 0.1, // 如果還不行，可以打開這一行試試，讓它微微可見
+          position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', 
+          objectFit: 'cover', zIndex: -1, 
         }}
       />
+
+      {/* DEBUG UI: 顯示偵測到的數字，讓你確認手勢是否正確 */}
+      {isStarted && !statusMsg && (
+        <div style={{
+            position: 'absolute', bottom: '20px', left: '20px', 
+            color: '#00ff00', fontSize: '24px', fontWeight: 'bold', 
+            zIndex: 9999, textShadow: '0 0 5px black', fontFamily: 'monospace'
+        }}>
+            手勢數字: {detectedGesture}
+        </div>
+      )}
 
       {!isStarted && (
         <div style={{
@@ -164,12 +163,9 @@ export default function HandTracker({ onHandUpdate }) {
               boxShadow: '0 0 20px #00ffff', color: '#000', fontWeight: 'bold'
             }}
           >
-            {statusMsg && statusMsg.includes("❌") ? "再試一次" : "✨ 啟動魔法 (iOS Fix)"}
+            {statusMsg && statusMsg.includes("❌") ? "再試一次" : "✨ 啟動魔法"}
           </button>
-          
-          {statusMsg && statusMsg.includes("❌") && (
-            <div style={{color: '#ff5555', marginTop: '20px', padding: '10px'}}>{statusMsg}</div>
-          )}
+          {statusMsg && <div style={{color: 'white', marginTop: '20px'}}>{statusMsg}</div>}
         </div>
       )}
 
