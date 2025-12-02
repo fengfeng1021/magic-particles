@@ -21,10 +21,8 @@ export default function HandTracker({ onHandUpdate }) {
 
       // --- 階段 2: 載入 AI 模型 ---
       setStatusMsg('步驟 1/3: 下載 AI 模型...')
-      console.log('正在載入 WASM:', import.meta.env.BASE_URL + 'models/vision_wasm_internal.wasm')
-      
       const vision = await FilesetResolver.forVisionTasks(
-        import.meta.env.BASE_URL + 'models/vision_wasm_internal.wasm'
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
       )
 
       handLandmarkerRef.current = await HandLandmarker.createFromOptions(
