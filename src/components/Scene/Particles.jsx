@@ -3,52 +3,61 @@ import { useRef, useMemo } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
-// --- 形狀生成函數 ---
+// 優化版：愛心更集中，且是平面的
 function getHeartPoints(count) {
   const points = new Float32Array(count * 3)
   for (let i = 0; i < count; i++) {
     const t = Math.random() * Math.PI * 2
-    const x = 16 * Math.pow(Math.sin(t), 3)
-    const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)
-    const z = (Math.random() - 0.5) * 5
-    points[i * 3] = x * 0.2
-    points[i * 3 + 1] = y * 0.2 + 2
+    // 使用更緊湊的數學公式
+    const x = 12 * Math.pow(Math.sin(t), 3)
+    const y = 10 * Math.cos(t) - 4 * Math.cos(2 * t) - 1.5 * Math.cos(3 * t) - Math.cos(4 * t)
+    const z = 0 // ⚠️ 強制平面化，確保正面看清楚
+    
+    // 稍微加一點點噪點讓它不要太死板，但非常微小
+    points[i * 3] = x * 0.15 + (Math.random()-0.5) * 0.2
+    points[i * 3 + 1] = y * 0.15 + 2 + (Math.random()-0.5) * 0.2
     points[i * 3 + 2] = z
   }
   return points
 }
 
+// 優化版：文字密度更高，字體更粗
 function getTextPoints(text, count) {
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')
-  canvas.width = 200
+  canvas.width = 250 // 加寬畫布
   canvas.height = 100
-  ctx.font = 'bold 50px Arial'
+  ctx.font = '900 60px Arial' // 使用最粗字體 (900)
   ctx.fillStyle = 'white'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(text, 100, 50)
+  ctx.fillText(text, 125, 50)
   
-  const imageData = ctx.getImageData(0, 0, 200, 100)
+  const imageData = ctx.getImageData(0, 0, 250, 100)
   const data = imageData.data
   const pixels = []
+  
+  // 採樣密度邏輯
   for (let i = 0; i < data.length; i += 4) {
-    if (data[i] > 128) {
+    if (data[i] > 200) { // 提高亮度門檻，只取最清楚的部分
       const index = i / 4
-      const x = (index % 200) - 100
-      const y = 50 - Math.floor(index / 200) 
+      const x = (index % 250) - 125
+      const y = 50 - Math.floor(index / 250) 
       pixels.push({x, y})
     }
   }
+  
   const points = new Float32Array(count * 3)
   for (let i = 0; i < count; i++) {
     if (pixels.length > 0) {
-      const pixel = pixels[i % pixels.length]
-      points[i * 3] = (pixel.x * 0.15) + (Math.random()-0.5)*0.5
-      points[i * 3 + 1] = (pixel.y * 0.15) + (Math.random()-0.5)*0.5
-      points[i * 3 + 2] = (Math.random() - 0.5) * 2
+      // 隨機取樣確保粒子均勻分佈在筆畫上
+      const pixel = pixels[Math.floor(Math.random() * pixels.length)]
+      // 縮小比例，讓字看起來更精緻
+      points[i * 3] = (pixel.x * 0.1) 
+      points[i * 3 + 1] = (pixel.y * 0.1) 
+      points[i * 3 + 2] = 0 // ⚠️ 強制平面化
     } else {
-        points[i * 3] = 0; points[i * 3+1] = 0; points[i * 3+2] = 0;
+       points[i * 3] = 0; points[i * 3+1] = 0; points[i * 3+2] = 0;
     }
   }
   return points
@@ -98,7 +107,7 @@ export default function Particles({ handData }) {
     const posAttr = pointsRef.current.geometry.attributes.position
     const colAttr = pointsRef.current.geometry.attributes.color
 
-    // --- [1] 手勢識別與防抖邏輯 ---
+    // --- [1] 手勢識別與防抖 ---
     let maxGesture = -1
     if (handData.length > 0) {
       handData.forEach(h => {
@@ -106,7 +115,6 @@ export default function Particles({ handData }) {
       })
     }
 
-    // 只有當手勢改變，且該手勢持續超過 20 幀 (約0.3秒) 才執行
     if (maxGesture === lastGestureRef.current) {
       gestureHoldCounter.current++
     } else {
@@ -114,8 +122,8 @@ export default function Particles({ handData }) {
       lastGestureRef.current = maxGesture
     }
 
-    // 當穩定偵測到手勢後，執行切換
-    if (gestureHoldCounter.current > 20) {
+    // 觸發切換形狀
+    if (gestureHoldCounter.current > 15) { // 加快一點反應速度 (15幀)
         if (maxGesture === 1 && currentShapeNameRef.current !== "1") {
             shapeTargetRef.current = getTextPoints("ONE", count)
             currentShapeNameRef.current = "1"
@@ -126,35 +134,68 @@ export default function Particles({ handData }) {
             shapeTargetRef.current = getTextPoints("COOL", count)
             currentShapeNameRef.current = "3"
         } else if (maxGesture === 0) {
-            // 握拳 (0): 觸發爆炸/重置
+            // 握拳重置
             if (shockwaveRef.current <= 0 && currentShapeNameRef.current !== "") {
                 shockwaveRef.current = 1.0
                 shapeTargetRef.current = null
                 currentShapeNameRef.current = ""
             }
         } else if (maxGesture >= 5) {
-            // 張開手 (5): 自由模式
-            if (currentShapeNameRef.current !== "") {
-                shapeTargetRef.current = null
-                currentShapeNameRef.current = ""
-            }
+            // 張開手重置
+            shapeTargetRef.current = null
+            currentShapeNameRef.current = ""
         }
     }
 
-    // 爆炸能量衰減
+    // 爆炸衰減
     if (shockwaveRef.current > 0) {
       shockwaveRef.current -= delta * 2.0 
       if (shockwaveRef.current < 0) shockwaveRef.current = 0
     }
 
+    // --- [2] 判斷是否為「雙手拉線」模式 ---
+    // 條件：兩隻手都在畫面上，且兩隻手都在捏合 (Pinching)
+    let isDualLineMode = false
+    let lineStart = null
+    let lineEnd = null
+    
+    if (handData.length === 2 && handData[0].isPinching && handData[1].isPinching) {
+        isDualLineMode = true
+        // 暫時打斷形狀模式
+        shapeTargetRef.current = null 
+        currentShapeNameRef.current = ""
+        
+        // 取得兩手座標
+        lineStart = { 
+            x: handData[0].x * viewport.width, 
+            y: handData[0].y * viewport.height,
+            z: 0 
+        }
+        lineEnd = { 
+            x: handData[1].x * viewport.width, 
+            y: handData[1].y * viewport.height,
+            z: 0
+        }
+    }
+
     const calmColor = new THREE.Color("#00ffff") 
-    const pinchColor = new THREE.Color("#ff0055") 
+    const pinchColor = new THREE.Color("#ff0055") // 紅色 (捏合/愛心)
+    const lineColor = new THREE.Color("#ffff00") // 黃色 (拉線)
     const whiteColor = new THREE.Color("#ffffff")
     const tempColor = new THREE.Color()
 
     const boundX = viewport.width / 2 + 1
     const boundY = viewport.height / 2 + 1
     const boundZ = 5 
+
+    // ⚠️ 關鍵修正：如果有形狀，或者正在拉線，停止旋轉，確保正面朝向用戶
+    if (shapeTargetRef.current || isDualLineMode) {
+        // 慢慢轉回正面 (rotation y -> 0)
+        pointsRef.current.rotation.y += (0 - pointsRef.current.rotation.y) * 0.1
+    } else {
+        // 自由模式下才自轉
+        pointsRef.current.rotation.y += delta * 0.05
+    }
 
     // --- 物理迴圈 ---
     for (let i = 0; i < count; i++) {
@@ -169,25 +210,56 @@ export default function Particles({ handData }) {
 
       let isFormingShape = false
       
-      // [A] 形狀優先模式
-      if (shapeTargetRef.current && shockwaveRef.current <= 0) {
+      // [A] 雙手拉線模式 (優先級最高)
+      if (isDualLineMode) {
+          // 線性插值 (Lerp)：根據粒子索引 i，把它們均勻排列在 start 和 end 之間
+          // ratio = 0 ~ 1
+          const ratio = i / count 
+          
+          // 計算目標點
+          const tx = lineStart.x + (lineEnd.x - lineStart.x) * ratio
+          const ty = lineStart.y + (lineEnd.y - lineStart.y) * ratio
+          const tz = 0
+          
+          // 加入一點點隨機抖動，做成「能量流」的感覺
+          const noise = 0.2
+          const targetX = tx + (Math.random()-0.5) * noise
+          const targetY = ty + (Math.random()-0.5) * noise
+          
+          // 強力吸附到線上
+          vx += (targetX - px) * 8.0 * delta
+          vy += (targetY - py) * 8.0 * delta
+          vz += (tz - pz) * 8.0 * delta
+          
+          // 變黃色
+          tempColor.set(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i))
+          tempColor.lerp(lineColor, 0.2)
+
+      } 
+      // [B] 形狀模式
+      else if (shapeTargetRef.current && shockwaveRef.current <= 0) {
         isFormingShape = true
         const tx = shapeTargetRef.current[i3]
         const ty = shapeTargetRef.current[i3 + 1]
         const tz = shapeTargetRef.current[i3 + 2]
         
-        // 使用強力彈簧吸附，減少混亂感
-        vx += (tx - px) * 5.0 * delta
-        vy += (ty - py) * 5.0 * delta
-        vz += (tz - pz) * 5.0 * delta
+        // ⚠️ 超強力鎖定：係數從 5.0 提升到 10.0，讓圖案非常穩
+        vx += (tx - px) * 10.0 * delta
+        vy += (ty - py) * 10.0 * delta
+        vz += (tz - pz) * 10.0 * delta
         
+        // 如果距離目標很近，就強制固定位置，防止抖動
+        if (Math.abs(tx - px) < 0.1 && Math.abs(ty - py) < 0.1) {
+            vx *= 0.5; vy *= 0.5; vz *= 0.5; // 剎車
+        }
+
         tempColor.set(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i))
-        tempColor.lerp(pinchColor, 0.05)
+        tempColor.lerp(pinchColor, 0.1)
       }
 
-      // [B] 手勢互動 (僅在非形狀模式下生效)
+      // [C] 自由手勢互動 (跟隨/捏合)
       let affectedByHand = false
-      if (!isFormingShape) {
+      if (!isFormingShape && !isDualLineMode) {
         handData.forEach(hand => {
             const targetX = hand.x * viewport.width
             const targetY = hand.y * viewport.height
@@ -197,29 +269,31 @@ export default function Particles({ handData }) {
             const distSq = dx*dx + dy*dy + dz*dz
             const dist = Math.sqrt(distSq) + 0.1
 
-            // 調整：降低旋轉亂流，增加指向性跟隨
             if (hand.isPinching) {
-              const force = 20.0 * delta
+              // 單手捏合：黑洞 (強力)
+              const force = 30.0 * delta
               vx += (dx / dist) * force
               vy += (dy / dist) * force
               vz += (dz / dist) * force
               affectedByHand = true
             } else {
-              // 跟隨力
-              const force = 6.0 * delta
-              vx += (dx / dist) * force
-              vy += (dy / dist) * force
-              vz += (dz / dist) * force
+              // ⚠️ 修正：跟隨模式 (讓粒子緊緊跟隨指尖)
+              // 距離越近，引力越強，創造「磁鐵」感
+              const force = 10.0 * delta // 提升跟隨力
+              // 如果在一定範圍內
+              if (dist < 3.0) {
+                  vx += (dx / dist) * force
+                  vy += (dy / dist) * force
+                  vz += (dz / dist) * force
+                  affectedByHand = true // 靠近手也變色
+              }
               
-              // 旋轉力 (大幅減弱，減少混亂感)
-              const spin = 1.0 * delta 
-              vx += -dy * spin / dist 
-              vy += dx * spin / dist
+              // 移除旋轉力，用戶說不喜歡亂轉
             }
         })
       }
 
-      // [C] 特效與變色
+      // [D] 特效與變色
       if (shockwaveRef.current > 0) {
         const distOrigin = Math.sqrt(px*px + py*py + pz*pz) + 0.1
         const boom = 40.0 * delta * shockwaveRef.current
@@ -229,17 +303,19 @@ export default function Particles({ handData }) {
         
         tempColor.set(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i))
         tempColor.lerp(whiteColor, 0.2)
-      } else if (!isFormingShape) {
+      } else if (!isFormingShape && !isDualLineMode) {
          if (affectedByHand) {
+            // 被手吸引時變色
             tempColor.set(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i))
-            tempColor.lerp(pinchColor, 0.1)
+            tempColor.lerp(pinchColor, 0.2)
          } else {
+            // 平靜時
             tempColor.set(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i))
             tempColor.lerp(calmColor, 0.05)
          }
       }
 
-      // [D] 歸位力
+      // [E] 歸位力 (沒有互動時)
       if (handData.length === 0 && !shapeTargetRef.current && shockwaveRef.current <= 0) {
         const ox = originalPositions[i3]
         const oy = originalPositions[i3 + 1]
@@ -249,7 +325,7 @@ export default function Particles({ handData }) {
         vz += (oz - pz) * 1.5 * delta
       }
 
-      // [E] 邊界檢查
+      // [F] 邊界
       const bounceFactor = -0.5
       if (px > boundX) { vx *= bounceFactor; posAttr.array[i3] = boundX; }
       else if (px < -boundX) { vx *= bounceFactor; posAttr.array[i3] = -boundX; }
@@ -258,9 +334,10 @@ export default function Particles({ handData }) {
       if (pz > boundZ) { vz *= bounceFactor; posAttr.array[i3 + 2] = boundZ; }
       else if (pz < -boundZ) { vz *= bounceFactor; posAttr.array[i3 + 2] = -boundZ; }
 
-      // [F] 物理核心調整：大幅增加阻尼 (Friction)
-      // 0.85 的阻尼會讓粒子運動更有「液體感」，不會亂飛
-      const friction = isFormingShape ? 0.85 : 0.90
+      // [G] 物理阻尼 (Friction)
+      // ⚠️ 關鍵：大幅增加阻尼，消除「滑溜感」
+      // 形狀/拉線模式下阻尼極高 (0.80)，讓粒子幾乎是瞬間停在目標點
+      const friction = (isFormingShape || isDualLineMode) ? 0.80 : 0.88
       vx *= friction
       vy *= friction
       vz *= friction
@@ -278,7 +355,7 @@ export default function Particles({ handData }) {
 
     posAttr.needsUpdate = true
     colAttr.needsUpdate = true
-    pointsRef.current.rotation.y += delta * 0.05
+    // 注意：這裡已經移除了 rotation.y += ... 的代碼，改由上方的邏輯控制
   })
 
   return (
