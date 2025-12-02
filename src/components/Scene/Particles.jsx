@@ -24,21 +24,45 @@ function getHeartPoints(count) {
 function getTextPoints(text, count) {
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')
+
+  // 1. 判斷是否為特定的長文字 (告白專用)
+  const isLongText = text.includes("章文馨")
   
-  // 自動縮放畫布
-  const fontSize = 80
-  const estimatedWidth = text.length * fontSize + 100
+  // 2. 設定行數與內容
+  // 如果是長文字，拆成兩行；否則維持單行
+  const lines = isLongText ? ["愛你哦", "章文馨寶寶 ❤"] : [text]
   
+  // 3. 調整字體大小與畫布
+  // 長文字用小一點的字 (60)，單行字用大字 (80)
+  const fontSize = isLongText ? 60 : 80 
+  
+  // 計算最長的一行寬度
+  const longestLine = lines.reduce((a, b) => a.length > b.length ? a : b)
+  const estimatedWidth = longestLine.length * fontSize + 50
+  // 如果是兩行，畫布高度要加倍
+  const estimatedHeight = isLongText ? fontSize * 4 : 150 
+
   canvas.width = estimatedWidth
-  canvas.height = 150 
-  
-  ctx.font = `bold ${fontSize}px "Microsoft YaHei", sans-serif`
+  canvas.height = estimatedHeight
+
+  ctx.font = `900 ${fontSize}px "Microsoft YaHei", sans-serif`
   ctx.fillStyle = 'white'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(text, estimatedWidth / 2, 75)
+
+  // 4. 繪製文字 (支援多行)
+  if (lines.length > 1) {
+      // 雙行模式：上下排列
+      // 第一行畫在上面 (30% 高度處)
+      ctx.fillText(lines[0], estimatedWidth / 2, estimatedHeight * 0.3)
+      // 第二行畫在下面 (70% 高度處)
+      ctx.fillText(lines[1], estimatedWidth / 2, estimatedHeight * 0.7)
+  } else {
+      // 單行模式：置中
+      ctx.fillText(text, estimatedWidth / 2, estimatedHeight / 2)
+  }
   
-  const imageData = ctx.getImageData(0, 0, estimatedWidth, 150)
+  const imageData = ctx.getImageData(0, 0, estimatedWidth, estimatedHeight)
   const data = imageData.data
   const pixels = []
   
@@ -46,7 +70,8 @@ function getTextPoints(text, count) {
     if (data[i] > 200) { 
       const index = i / 4
       const x = (index % estimatedWidth) - (estimatedWidth / 2)
-      const y = 75 - Math.floor(index / estimatedWidth) 
+      // Y 軸計算：將 Canvas 的 Y 座標轉換為 3D 空間的中心
+      const y = (estimatedHeight / 2) - Math.floor(index / estimatedWidth) 
       pixels.push({x, y})
     }
   }
@@ -55,8 +80,14 @@ function getTextPoints(text, count) {
   for (let i = 0; i < count; i++) {
     if (pixels.length > 0) {
       const pixel = pixels[Math.floor(Math.random() * pixels.length)]
-      points[i * 3] = (pixel.x * 0.04) 
-      points[i * 3 + 1] = (pixel.y * 0.04) 
+      
+      // 5. 縮放係數 (Scale)
+      // 如果是長文字，縮小為 0.025 (讓它能在 iPad 上完整顯示)
+      // 如果是單行短字，維持 0.04 (大氣魄)
+      const scale = isLongText ? 0.025 : 0.04
+      
+      points[i * 3] = pixel.x * scale
+      points[i * 3 + 1] = pixel.y * scale
       points[i * 3 + 2] = 0 
     } else {
        points[i * 3] = 0; points[i * 3+1] = 0; points[i * 3+2] = 0;
